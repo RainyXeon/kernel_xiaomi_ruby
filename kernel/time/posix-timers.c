@@ -168,10 +168,10 @@ static int posix_timer_add(struct k_itimer *timer)
 	 */
 	for (cnt = 0; cnt <= INT_MAX; cnt++) {
 		spin_lock(&hash_lock);
-		id = sig->next_posix_timer_id;
+		id = sig->posix_timer_id;
 
 		/* Write the next ID back. Clamp it to the positive space */
-		sig->next_posix_timer_id = (id + 1) & INT_MAX;
+		sig->posix_timer_id = (id + 1) & INT_MAX;
 
 		head = &posix_timers_hashtable[hash(sig, id)];
 		if (!__posix_timers_find(head, sig, id)) {
