@@ -1412,42 +1412,56 @@ static irqreturn_t ln8000_interrupt_handler(int irq, void *data)
 
 static int ln8000_irq_init(struct ln8000_info *info)
 {
-	const struct ln8000_platform_data *pdata = info->pdata;
-	int ret;
-	u8 mask, int_reg;
+  const struct ln8000_platform_data *pdata;
+  int ret;
+  u8 mask, int_reg;
 
-	if (LN8000_IS_PRIMARY(info)) {
-		if (info->pdata->irq_gpio) {
-			info->client->irq = gpiod_to_irq(pdata->irq_gpio);
-			if (info->client->irq < 0) {
-				ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio)
-					info->client->irq = 0;
-				return -EINVAL;
-			}
-			ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
-		}
-	}  else {
-		/* grab IRQ from primary device */
-		ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
-	}
-	/* interrupt mask setting */
-	mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
-	if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
-		mask |= LN8000_MASK_TEMP_INT;
-	if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
-		mask |= LN8000_MASK_CHARGE_PHASE_INT;
-	if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
-		mask |= LN8000_MASK_NTC_PROT_INT;
-	ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
-	/* read clear int_reg */
-	ret = ln8000_read_int_value(info, &int_reg);
-	if (IS_ERR_VALUE((unsigned long)ret)) {
-		ln_err("fail to read INT reg (ret=%d)\n", ret);
-		return IRQ_NONE;
-	}
-	ln_info("int1_msk=0x%x\n", mask);
+  if (!info || !info->pdata)
+    return -EINVAL;
 
-	return 0;
+  pdata = info->pdata;
+
+  if (LN8000_IS_PRIMARY(info)) {
+    if (info->pdata->irq_gpio) {
+      int irq = gpiod_to_irq(pdata->irq_gpio);
+      if (irq < 0) {
+        ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio);
+        info->client->irq = 0;
+        return -EINVAL;
+      }
+      info->client->irq = irq;
+      ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
+    }
+  } else {
+    ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
+  }
+
+  /* Configure interrupt mask */
+  mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | 
+         LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
+
+  if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
+    mask |= LN8000_MASK_TEMP_INT;
+  if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
+    mask |= LN8000_MASK_CHARGE_PHASE_INT;
+  if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
+    mask |= LN8000_MASK_NTC_PROT_INT;
+
+  ret = ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
+  if (ret < 0) {
+    ln_err("failed to write interrupt mask register (ret=%d)\n", ret);
+    return ret;
+  }
+
+  /* Read and clear any pending interrupts */
+  ret = ln8000_read_int_value(info, &int_reg);
+  if (IS_ERR_VALUE((unsigned long)ret)) {
+    ln_err("fail to read INT reg (ret=%d)\n", ret);
+    return ret;
+  }
+
+  ln_info("int1_msk=0x%x\n", mask);
+  return 0;
 }
 
 static void determine_initial_status(struct ln8000_info *info)
