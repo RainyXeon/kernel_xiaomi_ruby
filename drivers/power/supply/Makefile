@@ -141,7 +141,7 @@ endif
 obj-y += ti/
 obj-y += maxim/
 obj-y += mps/
-obj-y += ln/
+# obj-y += ln/
 obj-y += southchip/
 obj-y += xiaomi/
 obj-y += pmic_voter.o
