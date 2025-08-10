@@ -687,659 +687,6 @@ static void ln8000_update_opmode(struct ln8000_info *info)
 	} else if (val & LN8000_MASK_STANDBY_STS) {
 		op_mode = LN8000_OPMODE_STANDBY;
 	} else if (val & LN8000_MASK_SWITCHING_ENABLED) {
-#include <linux/types.h>
-#include <linux/hwid.h>
-//#include <linux/power/ln8000_charger.h>
-#include "ln8000.h"
-//#include <mt-plat/charger_type.h>
-
-#define LN8000_DUAL_CONFIG
-
-#define ln_err(fmt, ...)                \
-do {                                    \
-	if (info->dev_role == LN_PRIMARY)   \
-		printk(KERN_ERR "ln8000@pri: %s: " fmt, __func__, ##__VA_ARGS__);   \
-	else                                                                    \
-		printk(KERN_ERR "ln8000@sec: %s: " fmt, __func__, ##__VA_ARGS__);   \
-} while (0);
-
-#define ln_info(fmt, ...)               \
-do {                                    \
-	if (info->dev_role == LN_PRIMARY)   \
-		printk(KERN_INFO "ln8000@pri: %s: " fmt, __func__, ##__VA_ARGS__);  \
-	else                                                                    \
-		printk(KERN_INFO "ln8000@sec: %s: " fmt, __func__, ##__VA_ARGS__);  \
-} while (0);
-
-#define ln_dbg(fmt, ...)                \
-do {                                    \
-	if (info->dev_role == LN_PRIMARY)   \
-		printk(KERN_DEBUG "ln8000@pri: %s: " fmt, __func__, ##__VA_ARGS__); \
-	else                                                                    \
-		printk(KERN_DEBUG "ln8000@sec: %s: " fmt, __func__, ##__VA_ARGS__); \
-} while (0);
-
-#define LN8000_REG_PRINT(reg_addr, val)                         \
-do {                                                            \
-	ln_info("  --> [%-20s]   0x%02X   :   0x%02X\n",            \
-		#reg_addr, LN8000_REG_##reg_addr, (val) & 0xFF);    \
-} while (0);
-
-#define LN8000_PARSE_PROP(ret, pdata, field, prop, default_prop)        \
-do {                                                                    \
-	if (ret) {                                                          \
-		ln_info("%s = %d (set to default)\n", #field, default_prop);    \
-		pdata->field = default_prop;                                    \
-	} else {                                                            \
-		ln_info("%s = %d\n", #field, prop);                             \
-		pdata->field = prop;                                            \
-	}                                                                   \
-} while (0);
-
-#define LN8000_BIT_CHECK(val, idx, desc)		\
-do {							\
-	if (val & (1<<idx))				\
-		ln_info("-> %s\n", desc)		\
-} while (0);
-
-#define LN8000_IS_PRIMARY(info) (info->dev_role == LN_PRIMARY)
-#define LN8000_ROLE(info) (LN8000_IS_PRIMARY(info) ? "prim" : "sec ")
-#define LN8000_USE_GPIO(pdata) ((pdata != NULL) && (!IS_ERR_OR_NULL(pdata->irq_gpio)))
-#define LN8000_STATUS(val, mask) ((val & mask) ? true : false)
-
-enum ln8000_driver_data {
-	LN8000_STANDALONE,
-	LN8000_SLAVE,
-	LN8000_MASTER,
-};
-
-enum product_name {
-	UNKNOW,
-	RUBY,
-	RUBYPRO,
-	RUBYPLUS,
-};
-
-static int product_name = UNKNOW;
-static int fake_work_mode = LN8000_MASTER;
-
-static int ln8000_check_work_mode(struct ln8000_info *info, int driver_data)
-{
-	int ret = 0;
-	/*unsigned int data = 0;
-	int work_mode = WM_STANDALONE, ret = 0;
-
-	ret = regmap_read(chip->regmap, SC8551_CHG_CTRL_REG, &data);
-	if (ret) {
-		ln_err("failed to read work_mode\n");
-		return ret;
-	}
-
-	work_mode = (data & SC8551_WORK_MODE_MASK) >> SC8551_WORK_MODE_SHIFT;
-	if (work_mode != driver_data) {
-		ln_err("work_mode not match, work_mode = %d, driver_data = %d\n", work_mode, driver_data);
-		return -EINVAL;
-	}*/
-
-	switch (fake_work_mode) {
-	case LN8000_STANDALONE:
-		strcpy(info->log_tag, "[XMCHG_LN8000_ALONE]");
-		break;
-	case LN8000_SLAVE:
-		strcpy(info->log_tag, "[XMCHG_LN8000_SLAVE]");
-		break;
-	case LN8000_MASTER:
-		strcpy(info->log_tag, "[XMCHG_LN8000_MASTER]");
-		break;
-	default:
-		ln_err("not support work_mode\n");
-		return -EINVAL;
-	}
-
-	return ret;
-}
-
-
-/**
- * I2C control functions : when occurred I2C tranfer fault, we
- * will retry to it. (default count:3)
- */
-#define I2C_RETRY_CNT   3
-static int ln8000_read_reg(struct ln8000_info *info, u8 addr, void *data)
-{
-	int i, ret = 0;
-
-	mutex_lock(&info->i2c_lock);
-	for (i = 0; i < I2C_RETRY_CNT; ++i) {
-		ret = regmap_read(info->regmap, addr, data);
-		if (IS_ERR_VALUE((unsigned long)ret)) {
-			ln_info("failed-read, reg(0x%02X), ret(%d)\n", addr, ret);
-		} else {
-			break;
-		}
-	}
-	mutex_unlock(&info->i2c_lock);
-	return ret;
-}
-
-static int ln8000_bulk_read_reg(struct ln8000_info *info, u8 addr, void *data, int count)
-{
-	int i, ret = 0;
-
-	mutex_lock(&info->i2c_lock);
-	for (i = 0; i < I2C_RETRY_CNT; ++i) {
-		ret = regmap_bulk_read(info->regmap, addr, data, count);
-		if (IS_ERR_VALUE((unsigned long)ret)) {
-			ln_info("failed-bulk-read, reg(0x%02X, %d bytes), ret(%d)\n", addr, count, ret);
-		} else {
-			break;
-		}
-	}
-	mutex_unlock(&info->i2c_lock);
-	return ret;
-}
-
-static int ln8000_write_reg(struct ln8000_info *info, u8 addr, u8 data)
-{
-	int i, ret = 0;
-
-	mutex_lock(&info->i2c_lock);
-	for (i = 0; i < I2C_RETRY_CNT; ++i) {
-		ret = regmap_write(info->regmap, addr, data);
-		if (IS_ERR_VALUE((unsigned long)ret)) {
-			ln_info("failed-write, reg(0x%02X), ret(%d)\n", addr, ret);
-		} else {
-			break;
-		}
-	}
-	mutex_unlock(&info->i2c_lock);
-	return ret;
-}
-
-static int ln8000_update_reg(struct ln8000_info *info, u8 addr, u8 mask, u8 data)
-{
-	int i, ret = 0;
-
-	mutex_lock(&info->i2c_lock);
-	for (i = 0; i < I2C_RETRY_CNT; ++i) {
-		ret = regmap_update_bits(info->regmap, addr, mask, data);
-		if (IS_ERR_VALUE((unsigned long)ret)) {
-			ln_info("failed-update, reg(0x%02X), ret(%d)\n", addr, ret);
-		} else {
-			break;
-		}
-	}
-	mutex_unlock(&info->i2c_lock);
-	return ret;
-}
-
-/**
- * Register control functions
- */
-static int ln8000_set_sw_freq(struct ln8000_info *info, unsigned int cfg)
-{
-	return ln8000_update_reg(info, LN8000_REG_SYS_CTRL, 0xF << 4, cfg << 4);
-}
-
-static int ln8000_set_disovl(struct ln8000_info *info, u8 cfg)
-{
-	int ret;
-
-	ln8000_write_reg(info, LN8000_REG_LION_CTRL, 0xAA);
-
-	ret = ln8000_update_reg(info, 0x3A, 0x7, cfg);    // TRIM_ADC[2:0] DISOVL_CFG
-
-	ln8000_write_reg(info, LN8000_REG_LION_CTRL, 0x00);
-
-	return ret;
-}
-
-static int ln8000_set_vac_ovp(struct ln8000_info *info, unsigned int ovp_th)
-{
-	u8 cfg;
-
-	if (ovp_th <= 6500000) {
-		cfg = LN8000_VAC_OVP_6P5V;
-	} else if (ovp_th <= 11000000) {
-		cfg = LN8000_VAC_OVP_11V;
-	} else if (ovp_th <= 12000000) {
-		cfg = LN8000_VAC_OVP_12V;
-	} else {
-		cfg = LN8000_VAC_OVP_13V;
-	}
-
-	return ln8000_update_reg(info, LN8000_REG_GLITCH_CTRL, 0x3 << 2, cfg << 2);
-}
-
-/* battery float voltage */
-static int ln8000_set_vbat_float(struct ln8000_info *info, unsigned int cfg)
-{
-	u8 val;
-
-	if (cfg < LN8000_VBAT_FLOAT_MIN)
-		val = 0x00;
-	else if (cfg > LN8000_VBAT_FLOAT_MAX)
-		val = 0xFF;
-	else
-		val = (cfg - LN8000_VBAT_FLOAT_MIN) / LN8000_VBAT_FLOAT_LSB;
-
-	return ln8000_write_reg(info, LN8000_REG_V_FLOAT_CTRL, val);
-}
-
-static int ln8000_set_iin_limit(struct ln8000_info *info, unsigned int cfg)
-{
-	u8 val = cfg / LN8000_IIN_CFG_LSB;
-
-	ln_info("iin_limit=%dmV(iin_ctrl=0x%x)\n", cfg / 1000, val);
-
-	return ln8000_update_reg(info, LN8000_REG_IIN_CTRL, 0x7F, val);
-}
-
-static int ln8000_set_ntc_alarm(struct ln8000_info *info, unsigned int cfg)
-{
-	int ret;
-
-	/* update lower bits */
-	ret = ln8000_write_reg(info, LN8000_REG_NTC_CTRL, (cfg & 0xFF));
-	if (ret < 0)
-		return ret;
-
-	/* update upper bits */
-	ret = ln8000_update_reg(info, LN8000_REG_ADC_CTRL, 0x3, (cfg >> 8));
-	return ret;
-}
-
-/* battery voltage OV protection */
-static int ln8000_enable_vbat_ovp(struct ln8000_info *info, bool enable)
-{
-	u8 val;
-
-	val = (enable) ? 0 : 1;//disable
-	val <<= LN8000_BIT_DISABLE_VBAT_OV;
-
-	return ln8000_update_reg(info, LN8000_REG_FAULT_CTRL, BIT(LN8000_BIT_DISABLE_VBAT_OV), val);
-}
-
-static int ln8000_enable_vbat_regulation(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_DISABLE_VFLOAT_LOOP,
-			!(enable) << LN8000_BIT_DISABLE_VFLOAT_LOOP);
-}
-
-static int ln8000_enable_vbat_loop_int(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_ENABLE_VFLOAT_LOOP_INT,
-			enable << LN8000_BIT_ENABLE_VFLOAT_LOOP_INT);
-}
-
-/* input current OC protection */
-static int ln8000_enable_iin_ocp(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_FAULT_CTRL,
-			0x1 << LN8000_BIT_DISABLE_IIN_OCP,
-			!(enable) << LN8000_BIT_DISABLE_IIN_OCP);
-}
-
-static int ln8000_enable_iin_regulation(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_DISABLE_IIN_LOOP,
-			!(enable) << LN8000_BIT_DISABLE_IIN_LOOP);
-}
-
-static int ln8000_enable_iin_loop_int(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_ENABLE_IIN_LOOP_INT,
-			enable << LN8000_BIT_ENABLE_IIN_LOOP_INT);
-}
-
-static int ln8000_enable_vac_ov(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_FAULT_CTRL,
-			0x1 << LN8000_BIT_DISABLE_VAC_OV,
-			!(enable) << LN8000_BIT_DISABLE_VAC_OV);
-}
-
-static int ln8000_enable_vin_uv_track(struct ln8000_info *info, bool enable)
-{
-    return ln8000_update_reg(info, LN8000_REG_FAULT_CTRL, 0x1 << 0, !(enable) << 0);
-}
-
-static int ln8000_enable_tdie_prot(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_TEMP_MAX_EN, enable << LN8000_BIT_TEMP_MAX_EN);
-}
-
-static int ln8000_enable_tdie_regulation(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_REGULATION_CTRL,
-			0x1 << LN8000_BIT_TEMP_REG_EN, enable << LN8000_BIT_TEMP_REG_EN);
-}
-
-/* ADC channel enable */
-static int ln8000_set_adc_ch(struct ln8000_info *info, unsigned int ch, bool enable)
-{
-	u8 mask;
-	u8 val;
-	int ret;
-
-	if ((ch > LN8000_ADC_CH_ALL) || (ch < 1))
-		return -EINVAL;
-
-	if (ch == LN8000_ADC_CH_ALL) {
-		// update all channels
-		val  = (enable) ? 0x3E : 0x00;
-		ret  = ln8000_write_reg(info, LN8000_REG_ADC_CFG, val);
-	} else {
-		// update selected channel
-		mask = 1<<(ch-1);
-		val  = (enable) ? 1 : 0;
-		val <<= (ch-1);
-		ret  = ln8000_update_reg(info, LN8000_REG_ADC_CFG, mask, val);
-	}
-
-	return ret;
-}
-
-/* BUS temperature monitoring (protection+alarm) */
-static int ln8000_enable_tbus_monitor(struct ln8000_info *info, bool enable)
-{
-	int ret;
-
-	/* enable BUS monitoring */
-	ret = ln8000_update_reg(info, LN8000_REG_RECOVERY_CTRL, 0x1 << 1, enable << 1);
-	if (ret < 0)
-		return ret;
-
-	/* enable BUS ADC channel */
-	if (enable) {
-		ret = ln8000_set_adc_ch(info, LN8000_ADC_CH_TSBUS, true);
-	}
-	return ret;
-}
-
-/* BAT temperature monitoring (protection+alarm) */
-static int ln8000_enable_tbat_monitor(struct ln8000_info *info, bool enable)
-{
-	int ret;
-
-	/* enable BAT monitoring */
-	ret = ln8000_update_reg(info, LN8000_REG_RECOVERY_CTRL, 0x1 << 0, enable << 0);
-	if (ret < 0)
-		return ret;
-
-	/* enable BAT ADC channel */
-	if (enable) {
-		ret = ln8000_set_adc_ch(info, LN8000_ADC_CH_TSBAT, true);
-	}
-	return ret;
-}
-
-/* watchdog timer */
-static int ln8000_enable_wdt(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_TIMER_CTRL, 0x1 << 7, enable << 7);
-}
-
-#if 0
-static int ln8000_set_wdt(struct ln8000_info *info, unsigned int cfg)
-{
-	if (cfg >= LN8000_WATCHDOG_MAX) {
-		cfg = LN8000_WATCHDOG_40SEC;
-	}
-
-	return ln8000_update_reg(info, LN8000_REG_TIMER_CTRL, 0x3 << 5, cfg << 5);
-}
-#endif
-
-/* unplug / reverse-current detection */
-static int ln8000_enable_rcp(struct ln8000_info *info, bool enable)
-{
-	info->rcp_en = enable;
-
-	return ln8000_update_reg(info, LN8000_REG_SYS_CTRL,
-			BIT(LN8000_BIT_REV_IIN_DET),
-			enable << LN8000_BIT_REV_IIN_DET);
-}
-
-/* auto-recovery */
-static int ln8000_enable_auto_recovery(struct ln8000_info *info, bool enable)
-{
-	return ln8000_update_reg(info, LN8000_REG_RECOVERY_CTRL, 0xF << 4, ((0xF << 4) * enable));
-}
-
-static int ln8000_set_adc_mode(struct ln8000_info *info, unsigned int cfg)
-{
-	return ln8000_update_reg(info, LN8000_REG_ADC_CTRL, 0x7 << 5, cfg << 5);
-}
-
-static int ln8000_set_adc_hib_delay(struct ln8000_info *info, unsigned int cfg)
-{
-	return ln8000_update_reg(info, LN8000_REG_ADC_CTRL, 0x3 << 3, cfg << 3);
-}
-
-/* check if device has been initialized (by SW) */
-#if defined(LN8000_DUAL_CONFIG)
-static bool ln8000_is_sw_init(struct ln8000_info *info)
-{
-	u8 val;
-
-	ln8000_read_reg(info, LN8000_REG_CHARGE_CTRL, &val);
-
-	return (val >> 7);
-}
-#endif
-
-/* grab programmed battery float voltage (uV) */
-static int ln8000_get_vbat_float(struct ln8000_info *info)
-{
-	int ret, val;
-
-	ret = ln8000_read_reg(info, LN8000_REG_V_FLOAT_CTRL, &val);
-	if (ret < 0)
-		return ret;
-
-	return ((val & 0xFF) * LN8000_VBAT_FLOAT_LSB  + LN8000_VBAT_FLOAT_MIN);//uV
-}
-
-/* grab programmed input current limit (uA) */
-static int ln8000_get_iin_limit(struct ln8000_info *info)
-{
-	int ret, val;
-	int iin;
-
-	ret = ln8000_read_reg(info, LN8000_REG_IIN_CTRL, &val);
-	if (ret < 0)
-		return ret;
-
-	iin = ((val & 0x7F) * LN8000_IIN_CFG_LSB);
-
-	if (iin < LN8000_IIN_CFG_MIN) {
-		iin = LN8000_IIN_CFG_MIN;
-	}
-
-	return iin;
-}
-
-/* enable/disable STANDBY */
-static inline void ln8000_sw_standby(struct ln8000_info *info, bool standby)
-{
-	u8 val = (standby) ? BIT(LN8000_BIT_STANDBY_EN) : 0x00;
-	ln8000_update_reg(info, LN8000_REG_SYS_CTRL, BIT(LN8000_BIT_STANDBY_EN), val);
-}
-
-/* Convert Raw ADC Code */
-static void ln8000_convert_adc_code(struct ln8000_info *info, unsigned int ch, u8 *sts, int *result)
-{
-	int adc_raw;	// raw ADC value
-	int adc_final;	// final (converted) ADC value
-
-	switch (ch) {
-	case LN8000_ADC_CH_VOUT:
-		adc_raw   = ((sts[1] & 0xFF)<<2) | ((sts[0] & 0xC0)>>6);
-		adc_final = adc_raw * LN8000_ADC_VOUT_STEP;//uV
-		break;
-	case LN8000_ADC_CH_VIN:
-		adc_raw   = ((sts[1] & 0x3F)<<4) | ((sts[0] & 0xF0)>>4);
-		adc_final = adc_raw * LN8000_ADC_VIN_STEP;//uV
-		break;
-	case LN8000_ADC_CH_VBAT:
-		adc_raw   = ((sts[1] & 0x03)<<8) | (sts[0] & 0xFF);
-		adc_final = adc_raw * LN8000_ADC_VBAT_STEP;//uV
-		break;
-	case LN8000_ADC_CH_VAC:
-		adc_raw   = (((sts[1] & 0x0F)<<6) | ((sts[0] & 0xFC)>>2)) + LN8000_ADC_VAC_OS;
-		adc_final = adc_raw * LN8000_ADC_VAC_STEP;//uV
-		break;
-	case LN8000_ADC_CH_IIN:
-		adc_raw   = ((sts[1] & 0x03)<<8) | (sts[0] & 0xFF);
-		adc_final = adc_raw * LN8000_ADC_IIN_STEP;//uA
-		break;
-	case LN8000_ADC_CH_DIETEMP:
-		adc_raw   = ((sts[1] & 0x0F)<<6) | ((sts[0] & 0xFC)>>2);
-        adc_final = (935 - adc_raw) * 1000 / 2300;//dC
-		if (adc_final > LN8000_ADC_DIETEMP_MAX)
-			adc_final = LN8000_ADC_DIETEMP_MAX;
-		else if (adc_final < LN8000_ADC_DIETEMP_MIN)
-			adc_final = LN8000_ADC_DIETEMP_MIN;
-		break;
-	case LN8000_ADC_CH_TSBAT:
-		adc_raw   = ((sts[1] & 0x3F)<<4) | ((sts[0] & 0xF0)>>4);
-		adc_final = adc_raw * LN8000_ADC_NTCV_STEP;//(NTC) uV
-		break;
-	case LN8000_ADC_CH_TSBUS:
-		adc_raw   = ((sts[1] & 0xFF)<<2) | ((sts[0] & 0xC0)>>6);
-		adc_final = adc_raw * LN8000_ADC_NTCV_STEP;//(NTC) uV
-		break;
-	default:
-		adc_raw   = -EINVAL;
-		adc_final = -EINVAL;
-		break;
-	}
-
-	*result = adc_final;
-	return;
-}
-
-static void ln8000_print_regmap(struct ln8000_info *info)
-{
-	const u8 print_reg_num = (LN8000_REG_CHARGE_CTRL - LN8000_REG_INT1_MSK) + 1;
-	u8 regs[64] = {0x0, };
-	char temp_buf[128] = {0,};
-	int i, ret;
-
-	for (i = 0; i < print_reg_num; ++i) {
-		ret = ln8000_read_reg(info, LN8000_REG_INT1_MSK + i, &regs[i]);
-		if (IS_ERR_VALUE((unsigned long)ret)) {
-			ln_err("fail to read reg for print_regmap[%d]\n", i);
-			regs[i] = 0xFF;
-		}
-		sprintf(temp_buf + strlen(temp_buf), "0x%02X[0x%02X],", LN8000_REG_INT1_MSK + i, regs[i]);
-		if (((i+1) % 10 == 0) || ((i+1) == print_reg_num)) {
-			ln_info("%s\n", temp_buf);
-			memset(temp_buf, 0x0, sizeof(temp_buf));
-		}
-	}
-    ln8000_read_reg(info, LN8000_REG_BC_OP_1, &regs[0]);
-  //  ln8000_read_reg(info, LN8000_REG_PRODUCT_ID, &regs[1]);
-    ln8000_read_reg(info, LN8000_REG_BC_STS_B, &regs[2]);
-	ln_info("dual-config: 0x41=[0x%x], 0x31=[0x%x], 0x4A=[0x%x]\n", regs[0], regs[1], regs[2]);
-}
-
-/**
- * LN8000 device driver control routines
- */
-static int ln8000_check_status(struct ln8000_info *info)
-{
-	u8 val[4];
-
-	if (ln8000_bulk_read_reg(info, LN8000_REG_SYS_STS, val, 4) < 0) {
-		return -EINVAL;
-	}
-
-	mutex_lock(&info->data_lock);
-
-	info->vbat_regulated  = LN8000_STATUS(val[0], LN8000_MASK_VFLOAT_LOOP_STS);
-	info->iin_regulated   = LN8000_STATUS(val[0], LN8000_MASK_IIN_LOOP_STS);
-	info->pwr_status      = val[0] & (LN8000_MASK_BYPASS_ENABLED | LN8000_MASK_SWITCHING_ENABLED | \
-			LN8000_MASK_STANDBY_STS | LN8000_MASK_SHUTDOWN_STS);
-	info->tdie_fault      = LN8000_STATUS(val[1], LN8000_MASK_TEMP_MAX_STS);
-	info->tdie_alarm      = LN8000_STATUS(val[1], LN8000_MASK_TEMP_REGULATION_STS);
-	if (!info->pdata->tbat_mon_disable || !info->pdata->tbus_mon_disable) {
-		info->tbus_tbat_fault = LN8000_STATUS(val[1], LN8000_MASK_NTC_SHUTDOWN_STS); //tbus or tbat
-		info->tbus_tbat_alarm = LN8000_STATUS(val[1], LN8000_MASK_NTC_ALARM_STS);//tbus or tbat
-	}
-	info->iin_rc          = LN8000_STATUS(val[1], LN8000_MASK_REV_IIN_STS);
-
-	info->wdt_fault  = LN8000_STATUS(val[2], LN8000_MASK_WATCHDOG_TIMER_STS);
-	info->vbat_ov    = LN8000_STATUS(val[2], LN8000_MASK_VBAT_OV_STS);
-	info->vac_unplug = LN8000_STATUS(val[2], LN8000_MASK_VAC_UNPLUG_STS);
-	info->vac_ov     = LN8000_STATUS(val[2], LN8000_MASK_VAC_OV_STS);
-	info->vbus_ov    = LN8000_STATUS(val[2], LN8000_MASK_VIN_OV_STS);
-	info->volt_qual  = !(LN8000_STATUS(val[2], 0x7F));
-	if (info->volt_qual == 1 && info->chg_en == 1) {
-		info->volt_qual = !(LN8000_STATUS(val[3], 1 << 5));
-		if (info->volt_qual == 0) {
-            ln_info("volt_fault_detected (volt_qual=%d)\n", info->volt_qual);
-            /* clear latched status */
-            ln8000_update_reg(info, LN8000_REG_TIMER_CTRL, 0x1 << 2, 0x1 << 2);
-            ln8000_update_reg(info, LN8000_REG_TIMER_CTRL, 0x1 << 2, 0x0 << 2);
-		}
-	}
-	info->iin_oc     = LN8000_STATUS(val[3], LN8000_MASK_IIN_OC_DETECTED);
-
-	ln_info("LN8000_STATUS : SYS_STS[0x%2x], SAFETY_STS[0x%2x], FAULT1_STS[0x%2x], FAULT2_STS[0x%2x]\n",
-			val[0], val[1], val[2], val[3]);
-
-	mutex_unlock(&info->data_lock);
-
-	return 0;
-}
-
-static void ln8000_irq_sleep(struct ln8000_info *info, int suspend)
-{
-	if (info->client->irq <= 0)
-		return;
-
-	if (suspend) {
-		ln_info("disable/suspend IRQ\n");
-		disable_irq(info->client->irq);
-	} else {
-		ln_info("enable/resume IRQ\n");
-		enable_irq(info->client->irq);
-	}
-}
-
-static void ln8000_soft_reset(struct ln8000_info *info)
-{
-	ln8000_write_reg(info, LN8000_REG_LION_CTRL, 0xC6);
-
-	ln8000_irq_sleep(info, 1);
-
-	ln_info("(%s) Trigger soft-reset\n", LN8000_ROLE(info));
-	ln8000_update_reg(info, LN8000_REG_BC_OP_2, 0x1 << 0, 0x1 << 0);
-	msleep(5 * 2);  /* ln8000 min wait time 5ms (after POR) */
-
-	ln8000_irq_sleep(info, 0);
-}
-
-static void ln8000_update_opmode(struct ln8000_info *info)
-{
-	unsigned int op_mode;
-	u8 val;
-
-	/* chack mode status */
-	ln8000_read_reg(info, LN8000_REG_SYS_STS, &val);
-
-	if (val & LN8000_MASK_SHUTDOWN_STS) {
-		op_mode = LN8000_OPMODE_STANDBY;
-	} else if (val & LN8000_MASK_STANDBY_STS) {
-		op_mode = LN8000_OPMODE_STANDBY;
-	} else if (val & LN8000_MASK_SWITCHING_ENABLED) {
 		op_mode = LN8000_OPMODE_SWITCHING;
 	} else if (val & LN8000_MASK_BYPASS_ENABLED) {
 		op_mode = LN8000_OPMODE_BYPASS;
@@ -1436,10 +783,10 @@ static int ln8000_init_device(struct ln8000_info *info)
 	ln8000_enable_rcp(info, 1);
 	ln8000_change_opmode(info, LN8000_OPMODE_STANDBY);
 	if (info->dev_role == LN_SECONDARY) {
-	/* slave device didn't connect to OVPGATE */
-	ln8000_enable_vac_ov(info, 0);
+    	/* slave device didn't connect to OVPGATE */
+    	ln8000_enable_vac_ov(info, 0);
     } else {
-	ln8000_enable_vac_ov(info, 1);
+    	ln8000_enable_vac_ov(info, 1);
     }
 
 /* need to remove those */
@@ -2065,56 +1412,42 @@ static irqreturn_t ln8000_interrupt_handler(int irq, void *data)
 
 static int ln8000_irq_init(struct ln8000_info *info)
 {
-  const struct ln8000_platform_data *pdata;
-  int ret;
-  u8 mask, int_reg;
+	const struct ln8000_platform_data *pdata = info->pdata;
+	int ret;
+	u8 mask, int_reg;
 
-  if (!info || !info->pdata)
-    return -EINVAL;
+	if (LN8000_IS_PRIMARY(info)) {
+		if (info->pdata->irq_gpio) {
+			info->client->irq = gpiod_to_irq(pdata->irq_gpio);
+			if (info->client->irq < 0) {
+				ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio)
+					info->client->irq = 0;
+				return -EINVAL;
+			}
+			ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
+		}
+	}  else {
+		/* grab IRQ from primary device */
+		ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
+	}
+	/* interrupt mask setting */
+	mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
+	if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
+		mask |= LN8000_MASK_TEMP_INT;
+	if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
+		mask |= LN8000_MASK_CHARGE_PHASE_INT;
+	if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
+		mask |= LN8000_MASK_NTC_PROT_INT;
+	ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
+	/* read clear int_reg */
+	ret = ln8000_read_int_value(info, &int_reg);
+	if (IS_ERR_VALUE((unsigned long)ret)) {
+		ln_err("fail to read INT reg (ret=%d)\n", ret);
+		return IRQ_NONE;
+	}
+	ln_info("int1_msk=0x%x\n", mask);
 
-  pdata = info->pdata;
-
-  if (LN8000_IS_PRIMARY(info)) {
-    if (info->pdata->irq_gpio) {
-      int irq = gpiod_to_irq(pdata->irq_gpio);
-      if (irq < 0) {
-        ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio);
-        info->client->irq = 0;
-        return -EINVAL;
-      }
-      info->client->irq = irq;
-      ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
-    }
-  } else {
-    ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
-  }
-
-  /* Configure interrupt mask */
-  mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | 
-         LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
-
-  if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
-    mask |= LN8000_MASK_TEMP_INT;
-  if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
-    mask |= LN8000_MASK_CHARGE_PHASE_INT;
-  if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
-    mask |= LN8000_MASK_NTC_PROT_INT;
-
-  ret = ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
-  if (ret < 0) {
-    ln_err("failed to write interrupt mask register (ret=%d)\n", ret);
-    return ret;
-  }
-
-  /* Read and clear any pending interrupts */
-  ret = ln8000_read_int_value(info, &int_reg);
-  if (IS_ERR_VALUE((unsigned long)ret)) {
-    ln_err("fail to read INT reg (ret=%d)\n", ret);
-    return ret;
-  }
-
-  ln_info("int1_msk=0x%x\n", mask);
-  return 0;
+	return 0;
 }
 
 static void determine_initial_status(struct ln8000_info *info)
@@ -2578,7 +1911,7 @@ static int ops_ln8000_get_ibus_curr(struct charger_device *chg_dev, u32 *ibus_cu
 	} else {
 		v_offset = info->vbus_uV - (info->vbat_uV * 2);
 	}
-
+	
 	/* after charging-enabled, When the input current rises above rcp_th(over 200mA), it activates rcp. */
 	if (info->chg_en && !(info->rcp_en)) {
 		if (info->iin_uA > 400000) {
@@ -2740,7 +2073,7 @@ static int try_to_find_i2c_regess(struct i2c_client *client)
 	if (IS_ERR_VALUE((unsigned long)ret)) {
 		dev_err(&client->dev, "find to can be access regess(0x%x), to new addr(0x%0x)\n", client->addr, new_reg);
 		client->addr = new_reg;
-		ret = i2c_smbus_read_byte_data(client, LN8000_REG_DEVICE_ID);
+          	ret = i2c_smbus_read_byte_data(client, LN8000_REG_DEVICE_ID);
 	}
 
         return ret;
@@ -2751,7 +2084,7 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 	struct ln8000_info *info;
 	int ret = 0;
 
-
+	
 	ln8000_parse_cmdline(client);
 
 	if (product_name == RUBY) {
