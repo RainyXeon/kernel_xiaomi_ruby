@@ -593,7 +593,7 @@ static void ln8000_print_regmap(struct ln8000_info *info)
 	}
     ln8000_read_reg(info, LN8000_REG_BC_OP_1, &regs[0]);
   //  ln8000_read_reg(info, LN8000_REG_PRODUCT_ID, &regs[1]);
-    ln8000_read_reg(info, LN8000_REG_BC_STS_B, &regs[2]);
+    ln8000_read_reg(info, LN8000_REG_BC_STS_B, &regs[2]);      
 	ln_info("dual-config: 0x41=[0x%x], 0x31=[0x%x], 0x4A=[0x%x]\n", regs[0], regs[1], regs[2]);
 }
 
@@ -783,10 +783,10 @@ static int ln8000_init_device(struct ln8000_info *info)
 	ln8000_enable_rcp(info, 1);
 	ln8000_change_opmode(info, LN8000_OPMODE_STANDBY);
 	if (info->dev_role == LN_SECONDARY) {
-	/* slave device didn't connect to OVPGATE */
-	ln8000_enable_vac_ov(info, 0);
+    	/* slave device didn't connect to OVPGATE */
+    	ln8000_enable_vac_ov(info, 0);
     } else {
-	ln8000_enable_vac_ov(info, 1);
+    	ln8000_enable_vac_ov(info, 1);
     }
 
 /* need to remove those */
@@ -1412,56 +1412,42 @@ static irqreturn_t ln8000_interrupt_handler(int irq, void *data)
 
 static int ln8000_irq_init(struct ln8000_info *info)
 {
-  const struct ln8000_platform_data *pdata;
-  int ret;
-  u8 mask, int_reg;
+	const struct ln8000_platform_data *pdata = info->pdata;
+	int ret;
+	u8 mask, int_reg;
 
-  if (!info || !info->pdata)
-    return -EINVAL;
+	if (LN8000_IS_PRIMARY(info)) {
+		if (info->pdata->irq_gpio) {
+			info->client->irq = gpiod_to_irq(pdata->irq_gpio);
+			if (info->client->irq < 0) {
+				ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio)
+					info->client->irq = 0;
+				return -EINVAL;
+			}
+			ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
+		}
+	}  else {
+		/* grab IRQ from primary device */
+		ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
+	}
+	/* interrupt mask setting */
+	mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
+	if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
+		mask |= LN8000_MASK_TEMP_INT;
+	if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
+		mask |= LN8000_MASK_CHARGE_PHASE_INT;
+	if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
+		mask |= LN8000_MASK_NTC_PROT_INT;
+	ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
+	/* read clear int_reg */
+	ret = ln8000_read_int_value(info, &int_reg);
+	if (IS_ERR_VALUE((unsigned long)ret)) {
+		ln_err("fail to read INT reg (ret=%d)\n", ret);
+		return IRQ_NONE;
+	}
+	ln_info("int1_msk=0x%x\n", mask);
 
-  pdata = info->pdata;
-
-  if (LN8000_IS_PRIMARY(info)) {
-    if (info->pdata->irq_gpio) {
-      int irq = gpiod_to_irq(pdata->irq_gpio);
-      if (irq < 0) {
-        ln_err("fail to get irq from gpio(irq_gpio=%p)\n", pdata->irq_gpio);
-        info->client->irq = 0;
-        return -EINVAL;
-      }
-      info->client->irq = irq;
-      ln_info("mapped GPIO to irq (%d)\n", info->client->irq);
-    }
-  } else {
-    ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
-  }
-
-  /* Configure interrupt mask */
-  mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | 
-         LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
-
-  if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
-    mask |= LN8000_MASK_TEMP_INT;
-  if (info->pdata->iin_reg_disable && info->pdata->vbat_reg_disable)
-    mask |= LN8000_MASK_CHARGE_PHASE_INT;
-  if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
-    mask |= LN8000_MASK_NTC_PROT_INT;
-
-  ret = ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
-  if (ret < 0) {
-    ln_err("failed to write interrupt mask register (ret=%d)\n", ret);
-    return ret;
-  }
-
-  /* Read and clear any pending interrupts */
-  ret = ln8000_read_int_value(info, &int_reg);
-  if (IS_ERR_VALUE((unsigned long)ret)) {
-    ln_err("fail to read INT reg (ret=%d)\n", ret);
-    return ret;
-  }
-
-  ln_info("int1_msk=0x%x\n", mask);
-  return 0;
+	return 0;
 }
 
 static void determine_initial_status(struct ln8000_info *info)
@@ -1925,7 +1911,7 @@ static int ops_ln8000_get_ibus_curr(struct charger_device *chg_dev, u32 *ibus_cu
 	} else {
 		v_offset = info->vbus_uV - (info->vbat_uV * 2);
 	}
-
+	
 	/* after charging-enabled, When the input current rises above rcp_th(over 200mA), it activates rcp. */
 	if (info->chg_en && !(info->rcp_en)) {
 		if (info->iin_uA > 400000) {
@@ -2087,7 +2073,7 @@ static int try_to_find_i2c_regess(struct i2c_client *client)
 	if (IS_ERR_VALUE((unsigned long)ret)) {
 		dev_err(&client->dev, "find to can be access regess(0x%x), to new addr(0x%0x)\n", client->addr, new_reg);
 		client->addr = new_reg;
-		ret = i2c_smbus_read_byte_data(client, LN8000_REG_DEVICE_ID);
+          	ret = i2c_smbus_read_byte_data(client, LN8000_REG_DEVICE_ID);
 	}
 
         return ret;
@@ -2098,7 +2084,7 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 	struct ln8000_info *info;
 	int ret = 0;
 
-
+	
 	ln8000_parse_cmdline(client);
 
 	if (product_name == RUBY) {

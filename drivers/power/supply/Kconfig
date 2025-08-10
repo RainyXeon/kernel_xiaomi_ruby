@@ -575,15 +575,6 @@ config CHARGER_BQ25890
 	help
 	  Say Y to enable support for the TI BQ25890 battery charger.
 
-config CHARGER_SC8551
-	tristate "Southchip SC8551 battery charger driver"
-	depends on I2C
-	help
-	  This adds support for charger in SC8551.
-	  Say Y to include support for Southchip Semiconductor Technology
-	  SC8551 charger IC Battery Charger. The base name for this driver is
-	  'sc8551.c'.
-
 config CHARGER_SMB347
 	tristate "Summit Microelectronics SMB347 Battery Charger"
 	depends on I2C
@@ -630,8 +621,7 @@ config BATTERY_GOLDFISH
 
 config BATTERY_RT5033
 	tristate "RT5033 fuel gauge support"
-	depends on I2C
-	select REGMAP_I2C
+	depends on MFD_RT5033
 	help
 	  This adds support for battery fuel gauge in Richtek RT5033 PMIC.
 	  The fuelgauge calculates and determines the battery state of charge
@@ -826,13 +816,6 @@ config CUSTOM_BATTERY_EXTERNAL_CHANNEL
 	  Say Yes to enable support for Customer external gauge.
           It depends on MTK_PMIC_CHIP_MT6359P
           Added for Battery System test
-
-config CHARGER_RUBY_LN8000
-	bool "customer external gauge test"
-	default n
-	help
-		Enable driver ln8000 for ruby
-		only use this for indian variant
 
 if MACH_MT6768
 source "drivers/power/supply/mediatek/battery/Kconfig"
