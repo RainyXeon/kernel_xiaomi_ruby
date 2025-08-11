@@ -883,3 +883,4 @@ source "drivers/power/supply/mediatek/charger/Kconfig"
 endif
 
 endif # POWER_SUPPLY
+endmenu
