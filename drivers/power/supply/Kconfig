@@ -827,6 +827,13 @@ config CUSTOM_BATTERY_EXTERNAL_CHANNEL
           It depends on MTK_PMIC_CHIP_MT6359P
           Added for Battery System test
 
+config CHARGER_RUBY_LN8000
+	bool "customer external gauge test"
+	default n
+	help
+		Enable driver ln8000 for ruby
+		only use this for indian variant
+
 if MACH_MT6768
 source "drivers/power/supply/mediatek/battery/Kconfig"
 source "drivers/power/supply/mediatek/charger/Kconfig"
