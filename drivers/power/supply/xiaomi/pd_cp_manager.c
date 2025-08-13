@@ -683,10 +683,12 @@ static void pdm_bypass_check(struct usbpd_pm *pdpm)
 				else
 					pdpm->switch_mode = false;
 			} else {
-				if ((pdpm->thermal_limit_fcc > 0) &&(pdpm->thermal_limit_fcc <= pdpm->bypass_entry_fcc))
-					pdpm->switch_mode = true;
+				// Only enter bypass if thermal FCC is well below entry limit
+				if ((pdpm->thermal_limit_fcc > 0) &&
+						(pdpm->thermal_limit_fcc <= pdpm->bypass_entry_fcc - 1000000)) // 1A margin
+						pdpm->switch_mode = true;
 				else
-					pdpm->switch_mode = false;
+						pdpm->switch_mode = false;
 			}
 		} else {
 			pdpm->switch_mode = false;
